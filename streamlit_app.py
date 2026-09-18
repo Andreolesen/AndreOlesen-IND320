@@ -1,4 +1,5 @@
 import streamlit as st
 
-st.title("IND320 – Data to Decision")
-st.write("Hello! This is a minimal working Streamlit app.")
+st.set_page_config(page_title="IND320 - Data to Decision", page_icon=":bar_chart:", layout="wide")
+st.title("IND320 - Data to Decision")
+st.write("This is a Streamlit app for the IND320 course.")
