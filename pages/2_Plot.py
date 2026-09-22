@@ -7,20 +7,11 @@ st.title("Plot")
 
 df, data_columns = load_reservoir_data()
 
-# Readable labels for the dropdown, the actual column names stay the same internally
-column_display_names = {
-    "fill_ratio": "Fill ratio",
-    "capacity_TWh": "Capacity (TWh)",
-    "fill_TWh": "Fill (TWh)",
-    "fill_ratio_previous_week": "Fill ratio, previous week",
-    "fill_ratio_change": "Fill ratio, week-over-week change",
-}
 
 #  A sorted list of unique "YYYY-MM" labels to use as slider options
 month_labels = sorted(df["date"].dt.strftime("%Y-%m").unique())
 
-# Friendly, human-readable labels for the dropdown - the actual column
-# names stay the same internally, we just map back and forth for display.
+# Readable labels for the dropdown, the actual column names stay the same internally
 column_display_names = {
     "fill_ratio": "Fill ratio",
     "capacity_TWh": "Capacity (TWh)",
