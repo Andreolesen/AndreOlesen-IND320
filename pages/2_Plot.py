@@ -20,7 +20,7 @@ column_display_names = {
     "fill_ratio_change": "Fill ratio, week-over-week change",
 }
 
-# Dropdown: choose a single column (by its friendly label), or "All columns".
+# Dropdown: choose a single column, or "All columns".
 selected_label = st.selectbox(
     "Choose a column to plot",
     options=["All columns"] + [column_display_names[c] for c in data_columns],
@@ -44,11 +44,10 @@ filtered_df = df[(row_month >= start_month) & (row_month <= end_month)]
 fig, ax = plt.subplots(figsize=(10, 5))
 
 if selected_column == "All columns":
-    # Same reasoning as in the notebook: normalise so columns with very
+    # normalise so columns with very
     # different scales can be compared, excluding the near-constant capacity_TWh.
     columns_to_plot = [c for c in data_columns if c != "capacity_TWh"]
-    # Normalise using min/max from the FULL dataset (not just the filtered
-    # range), so the scale stays consistent as the user changes the slider.
+    # Normalise using min/max from the full dataset 
     normalized = (filtered_df[columns_to_plot] - df[columns_to_plot].min()) / (
         df[columns_to_plot].max() - df[columns_to_plot].min()
     )
