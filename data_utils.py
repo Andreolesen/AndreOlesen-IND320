@@ -37,3 +37,14 @@ def load_reservoir_data():
         "fill_ratio_change",
     ]
     return df_national[["date"] + data_columns], data_columns
+
+
+# Readable labels for the data columns, shared by all pages so the names are
+# the same everywhere. The internal column names stay unchanged.
+column_display_names = {
+    "fill_ratio": "Fill ratio",
+    "capacity_TWh": "Capacity (TWh)",
+    "fill_TWh": "Fill (TWh)",
+    "fill_ratio_previous_week": "Fill ratio, previous week",
+    "fill_ratio_change": "Fill ratio, week-over-week change",
+}
