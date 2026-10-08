@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import streamlit as st
+from pymongo import MongoClient
 
 # NVE Magasinstatistikk API (replaces data/reservoirs.csv from part 1). No API key needed.
 NVE_URL = "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk/HentOffentligData"
@@ -65,3 +66,14 @@ column_display_names = {
     "fill_ratio_previous_week": "Fill ratio, previous week",
     "fill_ratio_change": "Fill ratio, week-over-week change",
 }
+
+
+
+
+# st.cache_resource (not cache_data): the client is a connection object that should be
+# created once and shared across reruns, not copied like data.
+@st.cache_resource
+def get_mongo_client():
+    """Connect to MongoDB Atlas. The URI is read from st.secrets
+    locally from .streamlit/secrets.toml"""
+    return MongoClient(st.secrets["mongo"]["uri"])
