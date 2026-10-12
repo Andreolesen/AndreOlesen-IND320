@@ -32,33 +32,46 @@ start_month, end_month = st.select_slider(
 row_month = df["date"].dt.strftime("%Y-%m")
 filtered_df = df[(row_month >= start_month) & (row_month <= end_month)]
 
-fig, ax = plt.subplots(figsize=(10, 5))
+fig, ax = plt.subplots(figsize=(9, 4.5))
 
 if selected_column == "All columns":
-    # Min-max normalise so columns with very different scales can be compared.
-    # capacity_TWh is left out because it is constant (see the notebook).
-    columns_to_plot = [c for c in data_columns if c != "capacity_TWh"]
-    # Use min/max from the full dataset, not just the selected months, so the
-    # scale stays the same when the slider is moved.
-    normalized = (filtered_df[columns_to_plot] - df[columns_to_plot].min()) / (
-        df[columns_to_plot].max() - df[columns_to_plot].min()
+    # Two y-axes instead of normalising: in part 1 the normalised lines overlapped, because
+    # fill_TWh is just fill_ratio x a constant capacity (the two lines became identical).
+    # Left axis: fill ratio and fill ratio previous week (same unit, 0-1).
+    # Right axis: weekly change, which can be negative and has a much smaller scale.
+    ax.plot(filtered_df["date"], filtered_df["fill_ratio"], color="tab:blue", linewidth=1.8,
+            label=column_display_names["fill_ratio"])
+    ax.plot(filtered_df["date"], filtered_df["fill_ratio_previous_week"], color="tab:blue", linewidth=1.2,
+            linestyle="--", alpha=0.7, label=column_display_names["fill_ratio_previous_week"])
+    ax.set_ylabel("Fill ratio (0-1)", color="tab:blue")
+
+    ax_right = ax.twinx()
+    ax_right.plot(filtered_df["date"], filtered_df["fill_ratio_change"], color="tab:red", linewidth=1.2,
+                  label=column_display_names["fill_ratio_change"])
+    ax_right.axhline(0, color="tab:red", linewidth=0.5, linestyle=":")  # above 0 = filling, below = emptying
+    ax_right.set_ylabel("Weekly change", color="tab:red")
+
+    # Collect the legend entries from both axes into one legend
+    lines = ax.get_lines() + ax_right.get_lines()[:1]
+    ax.legend(lines, [line.get_label() for line in lines], loc="upper left", bbox_to_anchor=(1.12, 1.0))
+    ax.set_title(f"All columns, {start_month} to {end_month}")
+    st.caption(
+        "Fill ratio and the previous week are on the left axis, the weekly change on the right axis. "
+        "Fill (TWh) is not shown here since it is the fill ratio times the constant capacity (the same curve), "
+        "and capacity is constant. Both can be chosen as single columns in the menu above."
     )
-    for column in columns_to_plot:
-        ax.plot(filtered_df["date"], normalized[column], label=column_display_names[column])
-    ax.set_ylabel("Normalised value (0-1)")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0))
-    ax.set_title(f"All columns (normalised), {start_month} to {end_month}")
-    st.caption("All columns are min-max normalised to 0-1 so they can be compared on one axis. "
-               "Capacity is left out because it is constant.")
 else:
-    ax.plot(filtered_df["date"], filtered_df[selected_column])
+    ax.plot(filtered_df["date"], filtered_df[selected_column], linewidth=1.8)
     ax.set_ylabel(column_display_names[selected_column])
     ax.set_title(f"{column_display_names[selected_column]}, {start_month} to {end_month}")
 
 ax.set_xlabel("Date")
 ax.grid(alpha=0.3)
+fig.autofmt_xdate()  # tilted date labels so they don't overlap
 fig.tight_layout()
 st.pyplot(fig)
+
+st.caption("Tip: drag the slider to see a longer period, for example a whole year to see the seasonal pattern.")
 
 # Close the figure after drawing it. Streamlit reruns the whole script on every
 # widget change, so open figures would otherwise pile up in memory.
