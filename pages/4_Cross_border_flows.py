@@ -102,15 +102,11 @@ with right:
 
 # ---------------------------------------------------------------- data source
 with st.expander("About the data"):
-    st.markdown(
+        st.markdown(
         """
-        - **Source:** ENTSO-E Transparency Platform, *Physical flows* (document type A11), downloaded
-          through the RESTful API for 2024 and 2025.
-        - **Processing:** In the Jupyter Notebook the data was stored in a local Cassandra database with
-          Spark, summed to hourly energy with Spark (some of the data has 15 minute resolution), and then
-          stored in MongoDB Atlas. This page reads the data from MongoDB.
-        - **Units:** The pie chart shows total energy per year (TWh), the line plot shows energy per day (GWh).
-        - **Directions:** Export is flow out of the Norwegian price area, import is flow into it.
-          Times are in UTC.
+        - **Source:** ENTSO-E Transparency Platform, physical cross-border flows (A11), 2024-2025.
+        - **Processing:** Downloaded in the notebook, stored in Cassandra, summed to hourly energy with Spark
+          and saved in MongoDB, which this page reads from. Export = out of Norway, import = into Norway.
         """
     )
+    
