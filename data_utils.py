@@ -57,6 +57,43 @@ def load_reservoir_data():
     return df_national[["date"] + DATA_COLUMNS].reset_index(drop=True), DATA_COLUMNS
 
 
+@st.cache_data(ttl="1d")
+def load_month_labels():
+    """All months in the NVE data as "YYYY-MM" labels, used as options for the interval slider."""
+    df = load_all_reservoir_data()
+    return sorted(df["date"].dt.strftime("%Y-%m").unique())
+
+
+@st.cache_data(ttl="1d")
+def load_reservoir_interval(area_type, start_month, end_month):
+    """
+    The data for one area type (NO, EL or VASS) in the chosen interval of months.
+    The NVE API has no date parameters, so the full response is downloaded once (cached for a day)
+    and only the chosen interval and area type are kept. The result is cached per interval.
+    """
+    df = load_all_reservoir_data()
+    month = df["date"].dt.strftime("%Y-%m")
+    selected = df[(df["area_type"] == area_type) & (month >= start_month) & (month <= end_month)]
+    return selected.reset_index(drop=True)
+
+
+# Readable names for the area types and area numbers
+AREA_TYPE_LABELS = {
+    "NO": "Norway (whole country)",
+    "EL": "Price areas (EL, NO1-NO5)",
+    "VASS": "Watercourse areas (VASS)",
+}
+
+
+def area_label(area_type, area_number):
+    """Readable name for one area, e.g. "NO2" for price area 2."""
+    if area_type == "NO":
+        return "Norway"
+    if area_type == "EL":
+        return f"NO{area_number}"
+    return f"VASS {area_number}"
+
+
 # Readable labels for the data columns, shared by all pages so the names are
 # the same everywhere. The internal column names stay unchanged.
 column_display_names = {
