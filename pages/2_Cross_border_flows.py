@@ -5,10 +5,7 @@ import streamlit as st
 from data_utils import CONNECTION_NAMES, load_flow_options, load_month_flows, load_yearly_totals
 
 st.title("Cross-border electricity flows")
-st.write(
-    "Physical flows between the Norwegian price areas and the neighbouring countries. "
-    "Choose a connection and a year on the left, and directions and a month on the right."
-)
+st.write("Physical electricity flows between Norway and neighbouring countries (ENTSO-E).")
 
 # Connections and years that exist in MongoDB (cached in data_utils)
 connections, years = load_flow_options()
@@ -18,7 +15,7 @@ DIRECTION_LABELS = {"export": "Export (out of Norway)", "import": "Import (into 
 DIRECTION_COLOURS = {"export": "tab:blue", "import": "tab:orange"}
 
 # st.columns splits the page into two columns side by side
-left, right = st.columns(2)
+left, right = st.columns([2, 3])  # right side wider, so all 12 month pills fit
 
 # ---------------------------------------------------------------- left column: pie chart
 with left:
@@ -41,7 +38,7 @@ with left:
         directions = [d for d in ["export", "import"] if d in totals]
         values = [totals[d] for d in directions]
 
-        fig, ax = plt.subplots(figsize=(5, 5))
+        fig, ax = plt.subplots(figsize=(4, 4))
         ax.pie(
             values,
             labels=[f"{DIRECTION_LABELS[d]}\n{totals[d]:.2f} TWh" for d in directions],
@@ -55,42 +52,47 @@ with left:
 
 # ---------------------------------------------------------------- right column: line plot
 with right:
-    st.subheader("Flow in one month")
+    st.subheader("Flow in chosen months")
 
-    # Pills: choose which directions to show (both by default). This replaces the
-    # "production groups" in the task text, since the flow data has directions instead.
-    chosen_directions = st.pills(
-        "Directions",
-        options=["export", "import"],
+    # Pills: choose which months to include (several can be chosen). January is the default,
+    # like the plot in the notebook.
+    chosen_months = st.pills(
+        "Months",
+        options=list(range(1, 13)),
         selection_mode="multi",
-        default=["export", "import"],
-        format_func=lambda d: DIRECTION_LABELS[d],
+        default=[1],
+        format_func=lambda m: calendar.month_abbr[m],
     )
-    # Month selector with month names instead of numbers
-    month = st.selectbox("Month", options=list(range(1, 13)), format_func=lambda m: calendar.month_name[m])
 
-    month_data = load_month_flows(connection, year, month)
-
-    if not chosen_directions:
-        st.info("Choose at least one direction.")
-    elif month_data.empty:
-        st.warning("No data for this month.")
+    if not chosen_months:
+        st.info("Choose at least one month.")
     else:
-        # Sum the hourly values per day (GWh), same as the plot in the notebook
-        daily = (
-            month_data.groupby(["direction", month_data["time"].dt.date])["mwh"]
-            .sum()
-            .div(1000)
-            .reset_index()
-        )
-
         fig, ax = plt.subplots(figsize=(7, 5))
-        for direction in chosen_directions:
-            line = daily[daily["direction"] == direction]
-            ax.plot(line["time"], line["mwh"], color=DIRECTION_COLOURS[direction],
-                    linewidth=1.8, marker="o", markersize=3, label=DIRECTION_LABELS[direction])
+        labelled = set()  # so each direction only gets one entry in the legend
 
-        ax.set_title(f"Daily flow, {calendar.month_name[month]} {year}")
+        # One part of the line per chosen month, so months that are not next to each
+        # other are not joined by a straight line across the gap
+        for month in sorted(chosen_months):
+            month_data = load_month_flows(connection, year, month)
+            if month_data.empty:
+                continue
+
+            # Sum the hourly values per day (GWh), same as the plot in the notebook
+            daily = (
+                month_data.groupby(["direction", month_data["time"].dt.date])["mwh"]
+                .sum()
+                .div(1000)
+                .reset_index()
+            )
+            for direction in ["export", "import"]:
+                line = daily[daily["direction"] == direction]
+                label = DIRECTION_LABELS[direction] if direction not in labelled else None
+                labelled.add(direction)
+                ax.plot(line["time"], line["mwh"], color=DIRECTION_COLOURS[direction],
+                        linewidth=1.8, marker="o", markersize=3, label=label)
+
+        month_names = ", ".join(calendar.month_abbr[m] for m in sorted(chosen_months))
+        ax.set_title(f"Daily flow, {month_names} {year}")
         ax.set_xlabel("Date")
         ax.set_ylabel("Energy per day (GWh)")
         ax.grid(alpha=0.3)
