@@ -16,3 +16,6 @@ tempCodeRunnerFile.py
 
 # Local cache of the ENTSO-E download (large, not for GitHub)
 data/entsoe_flows.pkl
+# Downloads for part 3 (recreated by the notebook)
+data/nve_*_areas.geojson
+data/weather_*.pkl
