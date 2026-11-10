@@ -6,6 +6,8 @@ from data_utils import (
     DATA_COLUMNS,
     area_label,
     column_display_names,
+    get_selected_area,
+    load_area_numbers,
     load_month_labels,
     load_reservoir_interval,
 )
@@ -15,17 +17,41 @@ st.write("Weekly reservoir statistics from NVE. The choices at the top apply to 
 
 # ---------------------------------------------------------------- shared controls
 # The controls are placed above the tabs, so the table and the plot always show the same data.
-# (In part 1 the table and the plot were on separate pages with their own controls.)
 month_labels = load_month_labels()
 
 left, right = st.columns([1, 2])
 with left:
+    # The chosen area is saved in st.session_state["selected_area"], so the analysis pages use the
+    # same area. Streamlit removes the state of a widget when you go to another page, so the widgets
+    # get their start value from the saved choice when you come back.
+    saved_type, saved_number = get_selected_area()
+    if "area_type_widget" not in st.session_state:
+        st.session_state["area_type_widget"] = saved_type
+
     # Radio buttons for the type of area. The value is the code used in the data (NO/EL/VASS)
     area_type = st.radio(
         "Type of area",
         options=list(AREA_TYPE_LABELS),
         format_func=lambda code: AREA_TYPE_LABELS[code],
+        key="area_type_widget",
     )
+
+    # One area of that type, used by the pages with STL/spectrogram and weather data
+    area_numbers = load_area_numbers(area_type)
+    if saved_type != area_type or st.session_state.get("area_number_widget") not in area_numbers:
+        # new area type (or first visit): keep the saved area if it has this type, otherwise take the first one
+        st.session_state["area_number_widget"] = (
+            saved_number if saved_type == area_type and saved_number in area_numbers else area_numbers[0]
+        )
+    area_number = st.selectbox(
+        "Area for the analysis pages",
+        options=area_numbers,
+        format_func=lambda number: area_label(area_type, number),
+        key="area_number_widget",
+        help="Used by the pages Reservoir seasonality and Weather outliers. Weather data only exist for NO1-NO5.",
+    )
+    st.session_state["selected_area"] = (area_type, area_number)
+
     # Which column to show in both the table and the plot
     column = st.selectbox(
         "Column",
@@ -33,7 +59,7 @@ with left:
         format_func=lambda c: column_display_names[c],
     )
 with right:
-    # Interval slider over months (the slider from page three in part 1). A tuple as value gives
+    # Interval slider over months. A tuple as value gives
     # a range slider. Default is the last two years, so the seasonal pattern is visible.
     start_month, end_month = st.select_slider(
         "Download interval (months)",

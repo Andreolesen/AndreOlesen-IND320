@@ -1,3 +1,7 @@
+import time
+from datetime import date
+from pathlib import Path
+
 import pandas as pd
 import requests
 import streamlit as st
@@ -75,6 +79,38 @@ def load_reservoir_interval(area_type, start_month, end_month):
     month = df["date"].dt.strftime("%Y-%m")
     selected = df[(df["area_type"] == area_type) & (month >= start_month) & (month <= end_month)]
     return selected.reset_index(drop=True)
+
+
+@st.cache_data(ttl="1d")
+def load_national_key_figures():
+    """
+    Key figures for the home page: the latest week for the whole country (NO), compared with the
+    previous week, the same week last year and the median for the same week in earlier years.
+    """
+    df = load_all_reservoir_data()
+    national = df[(df["area_type"] == "NO") & (df["area_number"] == 0)].set_index("date").sort_index()
+    latest_date = national.index[-1]
+    latest = national.iloc[-1]
+
+    # Same week last year: 52 weeks (364 days) earlier, or the closest week if that date is missing
+    last_year = national.iloc[national.index.get_indexer([latest_date - pd.Timedelta(days=364)], method="nearest")[0]]
+
+    # "Normal" for this time of year: median of the same ISO week in all earlier years
+    weeks = national.index.isocalendar().week
+    week = latest_date.isocalendar().week
+    earlier = national[(weeks == week).to_numpy() & (national.index.year < latest_date.year)]
+
+    return {
+        "date": latest_date,
+        "week": int(week),
+        "fill_ratio": float(latest["fill_ratio"]),
+        "change_previous_week": float(latest["fill_ratio_change"]),
+        "fill_ratio_last_year": float(last_year["fill_ratio"]),
+        "median_same_week": float(earlier["fill_ratio"].median()),
+        "first_year": int(earlier.index.year.min()),
+        "fill_TWh": float(latest["fill_TWh"]),
+        "capacity_TWh": float(latest["capacity_TWh"]),
+    }
 
 
 # Readable names for the area types and area numbers
@@ -169,3 +205,104 @@ def load_month_flows(connection, year, month):
         {"_id": 0, "time": 1, "direction": 1, "mwh": 1},
     )
     return pd.DataFrame(list(cursor))
+
+
+# ---------------------------------------------------------------------------
+# Area chosen on the page "Reservoir data". It is saved in st.session_state, so the
+# analysis pages use the same area. Default is NO3, the same area as in the notebook.
+DEFAULT_AREA = ("EL", 3)
+
+
+def get_selected_area():
+    """The (area_type, area_number) chosen on the reservoir page, or NO3 if nothing is chosen yet."""
+    return st.session_state.get("selected_area", DEFAULT_AREA)
+
+
+@st.cache_data(ttl="1d")
+def load_area_numbers(area_type):
+    """The area numbers that have data for one area type (e.g. 1-5 for EL)."""
+    df = load_all_reservoir_data()
+    return sorted(df.loc[df["area_type"] == area_type, "area_number"].unique().tolist())
+
+
+@st.cache_data(ttl="1d")
+def load_fill_series(area_type, area_number):
+    """Weekly fill ratio for one area as a Series with the date as index (used by STL and the spectrogram)."""
+    df = load_all_reservoir_data()
+    area = df[(df["area_type"] == area_type) & (df["area_number"] == area_number)]
+    return area.set_index("date")["fill_ratio"].sort_index()
+
+
+# ---------------------------------------------------------------------------
+# Weather data from open-meteo (ERA5). The 1000 random locations per region are made in the
+# part 3 notebook (regions from NVE Atlas, sampled with geopandas) and saved in data/region_locations.csv.
+LOCATIONS_PATH = Path(__file__).parent / "data" / "region_locations.csv"
+WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"
+WEATHER_VARIABLES = [
+    "temperature_2m",
+    "precipitation",
+    "rain",
+    "snowfall",
+    "relative_humidity_2m",
+    "wind_speed_10m",
+    "cloud_cover",
+]
+# Only a few of the 1000 locations are used in the app. One location for a whole year counts as about
+# 26 API calls, so 5 locations (about 130 calls) stays far below the limits of open-meteo
+# (600 per minute, 5000 per hour, 10 000 per day). The notebook uses 50.
+N_APP_LOCATIONS = 5
+SEED = 42
+FIRST_WEATHER_YEAR = 2000
+LAST_WEATHER_YEAR = date.today().year - 1  # last complete year
+
+
+@st.cache_data
+def load_locations():
+    """The random locations (region, longitude, latitude) from the notebook."""
+    return pd.read_csv(LOCATIONS_PATH)
+
+
+def get_weather_batch(locations, start, end, max_retries=3):
+    """One API request for a few locations. Waits and tries again if the API says the limit is reached."""
+    params = {
+        "latitude": ",".join(f"{lat:.4f}" for lat in locations["latitude"]),
+        "longitude": ",".join(f"{lon:.4f}" for lon in locations["longitude"]),
+        "start_date": start,
+        "end_date": end,
+        "hourly": ",".join(WEATHER_VARIABLES),
+        "models": "era5",
+        "timezone": "UTC",
+    }
+    for attempt in range(max_retries):
+        response = requests.get(WEATHER_URL, params=params, timeout=300)
+        if response.status_code == 429:  # too many requests: wait a minute and try again
+            time.sleep(65)
+            continue
+        response.raise_for_status()
+        data = response.json()
+        return data if isinstance(data, list) else [data]  # one location gives a dict, several give a list
+    raise RuntimeError("open-meteo refused the request (API limit reached). Try again later.")
+
+
+# Cached per region and year (for a week): the archive data for a finished year does not change,
+# and the same choice should not use the API again.
+@st.cache_data(ttl="7d", show_spinner="Downloading weather data from open-meteo ...")
+def load_weather(region, year, n_locations=N_APP_LOCATIONS):
+    """
+    Hourly ERA5 weather for one region (e.g. "NO3") and year, averaged over n random locations.
+    Returns a DataFrame with the time as index and one column per weather variable.
+    """
+    locations = load_locations()
+    region_locations = locations[locations["region"] == region]
+    region_locations = region_locations.sample(n_locations, random_state=SEED)
+
+    results = get_weather_batch(region_locations, f"{year}-01-01", f"{year}-12-31")
+    frames = []
+    for result in results:
+        frame = pd.DataFrame(result["hourly"])
+        frame["time"] = pd.to_datetime(frame["time"])
+        frames.append(frame)
+    weather = pd.concat(frames, ignore_index=True)
+
+    # Average over the locations, hour by hour (same as in the notebook)
+    return weather.groupby("time")[WEATHER_VARIABLES].mean()
