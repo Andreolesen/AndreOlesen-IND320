@@ -14,8 +14,5 @@ tempCodeRunnerFile.py
 # Streamlit secrets (MongoDB password and ENTSO-E token, never on GitHub)
 .streamlit/secrets.toml
 
-# Local cache of the ENTSO-E download (large, not for GitHub)
-data/entsoe_flows.pkl
-# Downloads for part 3 (recreated by the notebook)
-data/nve_*_areas.geojson
-data/weather_*.pkl
+# Downloaded data (large, recreated by the notebooks). data/regions/ is on GitHub, the app needs it.
+data/cache/

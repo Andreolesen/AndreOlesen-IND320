@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import date
 from pathlib import Path
@@ -235,8 +236,9 @@ def load_fill_series(area_type, area_number):
 
 # ---------------------------------------------------------------------------
 # Weather data from open-meteo (ERA5). The 1000 random locations per region are made in the
-# part 3 notebook (regions from NVE Atlas, sampled with geopandas) and saved in data/region_locations.csv.
-LOCATIONS_PATH = Path(__file__).parent / "data" / "region_locations.csv"
+# part 3 notebook (regions from NVE Atlas, sampled with geopandas) and saved as GeoJSON points in
+# data/regions/region_locations.geojson (one feature per location, with the region as property).
+LOCATIONS_PATH = Path(__file__).parent / "data" / "regions" / "region_locations.geojson"
 WEATHER_URL = "https://archive-api.open-meteo.com/v1/archive"
 WEATHER_VARIABLES = [
     "temperature_2m",
@@ -258,8 +260,15 @@ LAST_WEATHER_YEAR = date.today().year - 1  # last complete year
 
 @st.cache_data
 def load_locations():
-    """The random locations (region, longitude, latitude) from the notebook."""
-    return pd.read_csv(LOCATIONS_PATH)
+    """The random locations (region, longitude, latitude) from the notebook, read from the GeoJSON file."""
+    with open(LOCATIONS_PATH, encoding="utf-8") as f:
+        features = json.load(f)["features"]
+    return pd.DataFrame([
+        {"region": feature["properties"]["region"],
+         "longitude": feature["geometry"]["coordinates"][0],   # GeoJSON order is (longitude, latitude)
+         "latitude": feature["geometry"]["coordinates"][1]}
+        for feature in features
+    ])
 
 
 def get_weather_batch(locations, start, end, max_retries=3):
