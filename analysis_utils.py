@@ -1,117 +1,110 @@
 """
-Analysis functions for the Streamlit app (part 3).
-The same functions are written and tested in Notebooks/IND320_part3.ipynb,
-here they are collected in one module so the pages can import them.
-Every function returns matplotlib figures, which the pages show with st.pyplot.
+Analysis functions for the Streamlit app (written and tested in the part 3 notebook).
+Part 4: the plots are Plotly figures (zoom, hover), styled by the "fjord" template in ui_utils.py, and the
+outlier functions work on any weather property, not only precipitation and temperature.
 """
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from scipy.fft import dct, idct
 from scipy.signal import spectrogram
 from scipy.stats import median_abs_deviation
 from sklearn.neighbors import LocalOutlierFactor
 from statsmodels.tsa.seasonal import STL
 
+from ui_utils import FJORD, GREY, OUTLIER
 
-def precipitation_outliers(series, freq_cutoff=50, n_std=3.0):
+HOURS_PER_YEAR = 365.25 * 24
+
+
+def spc_outliers(series, cutoff_per_year=25, n_std=3.0, label="Value", unit=""):
     """
-    Find outliers in a precipitation series with DCT high-pass filtering and robust SPC limits.
+    Outliers with DCT high-pass filtering and robust SPC limits, for any hourly weather series.
 
-    series: precipitation as a pandas Series with a time index
-    freq_cutoff: number of the lowest DCT frequencies that are removed (higher = more is seen as "slow" variation)
+    series: hourly values as a pandas Series with a time index
+    cutoff_per_year: variations slower than this many cycles per year are removed as "slow" (season and weather
+                     systems). DCT coefficient k is k/2 cycles over the series, so k = 2 * cutoff * years.
     n_std: how many robust standard deviations from the median the limits are
 
     Returns (figure, table of outliers, summary dictionary).
     """
     values = series.to_numpy(dtype=float)
+    years = len(values) / HOURS_PER_YEAR
+    n_removed = max(1, int(round(2 * cutoff_per_year * years)))
 
     # DCT of the whole series. type 2 + norm="ortho" makes idct the exact inverse
     coefficients = dct(values, type=2, norm="ortho")
-
-    # High-pass: remove the lowest frequencies -> seasonally adjusted variations (SATV)
     high_pass = coefficients.copy()
-    high_pass[:freq_cutoff] = 0
-    satv = idct(high_pass, type=2, norm="ortho")
-    slow = values - satv  # the season and slow weather changes
+    high_pass[:n_removed] = 0
+    satv = idct(high_pass, type=2, norm="ortho")  # seasonally adjusted variations
+    slow = values - satv
 
-    # Robust statistics for the SATV, estimated from the whole year
+    # Robust statistics of the SATV
     center = np.median(satv)
     sigma = 1.4826 * median_abs_deviation(satv)
     upper = slow + center + n_std * sigma
     lower = slow + center - n_std * sigma
-    is_outlier = (satv > center + n_std * sigma) | (satv < center - n_std * sigma)
+    above, below = satv > center + n_std * sigma, satv < center - n_std * sigma
+    is_outlier = above | below
 
-    # Plot: precipitation, the SPC limits and the outliers in a contrasting colour
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(series.index, values, color="tab:blue", linewidth=0.6, label="Average precipitation")
-    ax.plot(series.index, upper, color="black", linewidth=0.8, linestyle="--", label=f"SPC limits (±{n_std} σ)")
-    ax.plot(series.index, lower, color="black", linewidth=0.8, linestyle="--")
-    ax.scatter(series.index[is_outlier], values[is_outlier], color="tab:red", s=10, zorder=3, label="Outliers")
-    ax.set_title(f"Precipitation with SPC outliers (DCT cut-off {freq_cutoff}, {n_std} σ)")
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Precipitation (mm/h)")
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper left")
-    fig.tight_layout()
-    plt.close(fig)  # the figure is returned and shown by the caller
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=series.index, y=values, name=label, line=dict(color=FJORD, width=1)))
+    fig.add_trace(go.Scatter(x=series.index, y=upper, name=f"SPC limits (±{n_std} σ)",
+                             line=dict(color=GREY, width=1, dash="dash")))
+    fig.add_trace(go.Scatter(x=series.index, y=lower, showlegend=False, hoverinfo="skip",
+                             line=dict(color=GREY, width=1, dash="dash")))
+    fig.add_trace(go.Scatter(x=series.index[is_outlier], y=values[is_outlier], name="Outliers", mode="markers",
+                             marker=dict(color=OUTLIER, size=5)))
+    fig.update_layout(title=f"{label} with SPC outliers (DCT cut-off {cutoff_per_year} cycles/year, {n_std} σ)",
+                      yaxis_title=f"{label} ({unit})", xaxis_title="Time (UTC)", height=460, hovermode="x unified",
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
 
-    outliers = pd.DataFrame({
-        "precipitation": values[is_outlier],
-        "satv": satv[is_outlier],
-        "lower_limit": lower[is_outlier],
-        "upper_limit": upper[is_outlier],
-    }, index=series.index[is_outlier])
-
+    outliers = pd.DataFrame({label: values[is_outlier], "SATV": satv[is_outlier], "lower limit": lower[is_outlier],
+                             "upper limit": upper[is_outlier]}, index=series.index[is_outlier])
     summary = {
         "n_outliers": int(is_outlier.sum()),
-        "share_outliers": round(float(is_outlier.mean()), 4),
-        "n_above": int((satv > center + n_std * sigma).sum()),
-        "n_below": int((satv < center - n_std * sigma).sum()),
-        "robust_sigma": round(float(sigma), 4),
+        "share_outliers": float(is_outlier.mean()),
+        "n_above": int(above.sum()),
+        "n_below": int(below.sum()),
+        "robust_sigma": float(sigma),
     }
     return fig, outliers, summary
 
 
-def temperature_anomalies(series, contamination=0.01, n_neighbors=20):
+def lof_anomalies(series, contamination=0.01, n_neighbors=20, label="Value", unit=""):
     """
-    Find anomalies in a temperature series with Local Outlier Factor on (time, temperature).
+    Anomalies with Local Outlier Factor on (time, value), for any hourly weather series.
 
-    series: temperature as a pandas Series with a time index
-    contamination: proportion of points marked as anomalies
-    n_neighbors: number of neighbours LOF uses
-
+    contamination: proportion of points marked as anomalies; n_neighbors: number of neighbours LOF uses.
     Returns (figure, table of anomalies, summary dictionary).
     """
-    # Features: hours since start and temperature, standardised to mean 0 and std 1
+    # Features: hours since start and the value, standardised to mean 0 and std 1
     hours = ((series.index - series.index[0]) / pd.Timedelta(hours=1)).to_numpy(dtype=float)
     features = np.column_stack([hours, series.to_numpy(dtype=float)])
-    features = (features - features.mean(axis=0)) / features.std(axis=0)
+    spread = features.std(axis=0)
+    spread[spread == 0] = 1  # a constant series (e.g. no snow at all) cannot be scaled
+    features = (features - features.mean(axis=0)) / spread
 
     lof = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
-    is_anomaly = lof.fit_predict(features) == -1          # -1 = anomaly, 1 = normal
-    score = -lof.negative_outlier_factor_                  # higher = more unusual
+    is_anomaly = lof.fit_predict(features) == -1  # -1 = anomaly, 1 = normal
+    score = -lof.negative_outlier_factor_          # higher = more unusual
 
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(series.index, series.values, color="tab:blue", linewidth=0.6, label="Average temperature")
-    ax.scatter(series.index[is_anomaly], series.values[is_anomaly], color="tab:red", s=12, zorder=3,
-               label=f"LOF anomalies ({contamination:.0%})")
-    ax.set_title(f"Temperature with LOF anomalies (contamination {contamination}, {n_neighbors} neighbours)")
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Temperature (°C)")
-    ax.grid(alpha=0.3)
-    ax.legend(loc="upper left")
-    fig.tight_layout()
-    plt.close(fig)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=series.index, y=series.values, name=label, line=dict(color=FJORD, width=1)))
+    fig.add_trace(go.Scatter(x=series.index[is_anomaly], y=series.values[is_anomaly], mode="markers",
+                             name=f"LOF anomalies ({contamination:.1%})", marker=dict(color=OUTLIER, size=6)))
+    fig.update_layout(title=f"{label} with LOF anomalies ({n_neighbors} neighbours)", yaxis_title=f"{label} ({unit})",
+                      xaxis_title="Time (UTC)", height=460, hovermode="x unified",
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
 
-    anomalies = pd.DataFrame({"temperature": series.values[is_anomaly], "lof_score": score[is_anomaly]},
-                             index=series.index[is_anomaly]).sort_values("lof_score", ascending=False)
-
+    anomalies = pd.DataFrame({label: series.values[is_anomaly], "LOF score": score[is_anomaly]},
+                             index=series.index[is_anomaly]).sort_values("LOF score", ascending=False)
     summary = {
         "n_anomalies": int(is_anomaly.sum()),
-        "share_anomalies": round(float(is_anomaly.mean()), 4),
-        "coldest_anomaly": round(float(anomalies["temperature"].min()), 1),
-        "warmest_anomaly": round(float(anomalies["temperature"].max()), 1),
+        "share_anomalies": float(is_anomaly.mean()),
+        "lowest": float(anomalies[label].min()) if len(anomalies) else float("nan"),
+        "highest": float(anomalies[label].max()) if len(anomalies) else float("nan"),
         "months_with_most_anomalies": anomalies.index.month.value_counts().head(3).to_dict(),
     }
     return fig, anomalies, summary
@@ -119,48 +112,32 @@ def temperature_anomalies(series, contamination=0.01, n_neighbors=20):
 
 def stl_decomposition(series, period=52, seasonal=13, trend=105, robust=True):
     """
-    STL decomposition of a time series, plotted as four panels (original, trend, seasonal, remainder).
-
-    series: pandas Series with a time index (here weekly filling degree)
-    period: length of one season in number of observations (52 weeks)
-    seasonal, trend: lengths of the seasonal and trend smoothers (odd numbers)
-    robust: use robust fitting that reduces the weight of extreme values
-
+    STL decomposition of the weekly fill ratio, plotted as four panels (original, trend, seasonal, remainder).
+    seasonal, trend: lengths of the smoothers (odd numbers); robust: less weight to extreme weeks.
     Returns the figure.
     """
     result = STL(series, period=period, seasonal=seasonal, trend=trend, robust=robust).fit()
+    parts = [("Original", series), ("Trend", result.trend), ("Seasonal", result.seasonal), ("Remainder", result.resid)]
 
-    parts = [
-        ("Original", series),
-        ("Trend", result.trend),
-        ("Seasonal", result.seasonal),
-        ("Remainder", result.resid),
-    ]
-    fig, axes = plt.subplots(4, 1, figsize=(14, 9), sharex=True)
-    for ax, (name, values) in zip(axes, parts):
-        if name == "Remainder":
-            ax.scatter(values.index, values, s=3)       # points make single weeks easier to see
-            ax.axhline(0, color="black", linewidth=0.5)
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.04, subplot_titles=[p[0] for p in parts])
+    for row, (name, values) in enumerate(parts, start=1):
+        if name == "Remainder":  # points make single weeks easier to see
+            fig.add_trace(go.Scatter(x=values.index, y=values * 100, mode="markers", name=name,
+                                     marker=dict(color=FJORD, size=3)), row=row, col=1)
+            fig.add_hline(y=0, line=dict(color=GREY, width=1), row=row, col=1)
         else:
-            ax.plot(values.index, values, linewidth=0.9)
-        ax.set_ylabel(name)
-        ax.grid(alpha=0.3)
-    axes[-1].set_xlabel("Date")
-    fig.suptitle(f"STL of filling degree (period={period}, seasonal={seasonal}, trend={trend}, robust={robust})")
-    fig.tight_layout()
-    plt.close(fig)
+            fig.add_trace(go.Scatter(x=values.index, y=values * 100, name=name, line=dict(color=FJORD, width=1.2)),
+                          row=row, col=1)
+        fig.update_yaxes(title_text="%" if name in ("Original", "Trend") else "pp", row=row, col=1)
+    fig.update_layout(title=f"STL of the fill ratio (period={period}, seasonal={seasonal}, trend={trend}, robust={robust})",
+                      height=820, showlegend=False)
     return fig
 
 
 def filling_spectrogram(series, window_length=104, overlap=78, max_frequency=6):
     """
-    Spectrogram of a weekly time series.
-
-    series: pandas Series with a weekly time index
-    window_length: weeks per window
-    overlap: weeks shared by two neighbouring windows (must be smaller than window_length)
-    max_frequency: highest frequency (cycles per year) shown in the plot
-
+    Spectrogram of a weekly series: frequency (cycles per year) over time, power as colour.
+    window_length: weeks per window; overlap: weeks shared by two neighbouring windows.
     Returns the figure.
     """
     weeks_per_year = 365.25 / 7
@@ -169,19 +146,18 @@ def filling_spectrogram(series, window_length=104, overlap=78, max_frequency=6):
         fs=weeks_per_year,        # samples per year -> frequencies in cycles per year
         nperseg=window_length,
         noverlap=overlap,
-        detrend="constant",       # remove the mean in each window, so frequency 0 doesn't dominate
+        detrend="constant",       # remove the mean in each window, so frequency 0 does not dominate
         scaling="spectrum",
     )
-    # times are in years after the first week -> convert to dates for the x-axis
-    dates = series.index[0] + pd.to_timedelta(times * 365.25, unit="D")
+    dates = series.index[0] + pd.to_timedelta(times * 365.25, unit="D")  # window centres as dates
+    keep = frequencies <= max_frequency
 
-    fig, ax = plt.subplots(figsize=(14, 5))
-    mesh = ax.pcolormesh(dates, frequencies, 10 * np.log10(power + 1e-12), shading="auto", cmap="viridis")
-    ax.set_ylim(0, max_frequency)
-    ax.set_title(f"Spectrogram of filling degree (window {window_length} weeks, overlap {overlap} weeks)")
-    ax.set_xlabel("Date (centre of window)")
-    ax.set_ylabel("Frequency (cycles per year)")
-    fig.colorbar(mesh, ax=ax, label="Power (dB)")
-    fig.tight_layout()
-    plt.close(fig)
+    fig = go.Figure(go.Heatmap(
+        x=dates, y=frequencies[keep], z=10 * np.log10(power[keep] + 1e-12),
+        colorscale=[[0, "#F2F6F8"], [0.35, "#B5CCD6"], [0.65, "#5F8EA3"], [0.85, FJORD], [1, "#0E2F40"]],
+        colorbar=dict(title=dict(text="Power (dB)", side="right"), thickness=12, outlinewidth=0),
+        hovertemplate="%{x|%b %Y}<br>%{y:.2f} cycles/year<br>%{z:.1f} dB<extra></extra>",
+    ))
+    fig.update_layout(title=f"Spectrogram of the fill ratio (window {window_length} weeks, overlap {overlap} weeks)",
+                      xaxis_title="Date (centre of window)", yaxis_title="Frequency (cycles per year)", height=480)
     return fig

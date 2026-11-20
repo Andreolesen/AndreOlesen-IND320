@@ -1,22 +1,19 @@
 import streamlit as st
 from analysis_utils import filling_spectrogram, stl_decomposition
-from data_utils import area_label, get_selected_area, load_fill_series
+from data_utils import get_selected_area, load_fill_series
+from ui_utils import page_header, selection_line
 
-st.title("Seasonality in reservoir filling")
-st.write("STL decomposition and spectrogram of the weekly fill ratio from NVE (all weeks since 1995).")
+page_header("Seasonality", "patterns", "STL decomposition and spectrogram of the weekly fill ratio from NVE (all weeks since 1995).")
 
-# The area is a global setting: this page uses the area chosen on the page "Reservoir data"
+# The area is a global setting: this page uses the area chosen on the Overview page
 # (saved in st.session_state) instead of a local selector, since it is the same NVE data.
 # The parameters for STL and the spectrogram are local, since they only matter on this page. STL and the spectrogram need the whole series, so the interval slider there is not used.
 area_type, area_number = get_selected_area()
 series = load_fill_series(area_type, area_number)
 
-info, link = st.columns([3, 1])
-info.info(
-    f"Area: **{area_label(area_type, area_number)}**, {len(series)} weeks from "
-    f"{series.index.min().date()} to {series.index.max().date()}."
-)
-link.page_link("pages/1_Reservoir_data.py", label="Change area", icon=":material/tune:")
+selection_line(show_period=False)
+st.caption(f"{len(series)} weeks from {series.index.min().date()} to {series.index.max().date()}. "
+           "STL and the spectrogram need the whole history, so the period from the Overview page is not used here.")
 
 stl_tab, spectrogram_tab = st.tabs(["STL decomposition", "Spectrogram"])
 
@@ -34,7 +31,8 @@ with stl_tab:
     robust = c4.checkbox("Robust fitting", value=True,
                          help="Gives less weight to extreme weeks, so they end up in the remainder.")
 
-    st.pyplot(stl_decomposition(series, period=period, seasonal=seasonal, trend=trend, robust=robust))
+    st.plotly_chart(stl_decomposition(series, period=period, seasonal=seasonal, trend=trend, robust=robust),
+                    theme=None)
 
     with st.expander("How to read the plot"):
         st.markdown(
@@ -58,8 +56,8 @@ with spectrogram_tab:
                         value=min(78, window_length - 1), help="Weeks shared by two neighbouring windows.")
     max_frequency = c3.slider("Highest frequency shown (cycles per year)", min_value=2, max_value=26, value=6)
 
-    st.pyplot(filling_spectrogram(series, window_length=window_length, overlap=overlap,
-                                  max_frequency=max_frequency))
+    st.plotly_chart(filling_spectrogram(series, window_length=window_length, overlap=overlap,
+                                        max_frequency=max_frequency), theme=None)
 
     with st.expander("How to read the plot"):
         st.markdown(

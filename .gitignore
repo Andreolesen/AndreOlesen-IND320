@@ -16,3 +16,6 @@ tempCodeRunnerFile.py
 
 # Downloaded data (large, recreated by the notebooks). data/regions/ is on GitHub, the app needs it.
 data/cache/
+
+# Files the Claude desktop app saves from the chat (not part of the project)
+Claude outputs/

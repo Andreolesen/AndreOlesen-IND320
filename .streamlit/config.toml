@@ -1,0 +1,21 @@
+# Theme "Fjord": the same look on every page (colours and fonts from the sketch in the part 4 notebook)
+[theme]
+base = "light"
+primaryColor = "#1F5F7A"                 # fjord blue: buttons, sliders, selected area on the map
+backgroundColor = "#F7F9FA"              # off-white page background
+secondaryBackgroundColor = "#EEF2F5"     # inputs and code blocks
+textColor = "#1B2631"
+linkColor = "#1F5F7A"
+borderColor = "#D5DEE4"
+showWidgetBorder = true
+baseRadius = "0.6rem"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+chartCategoricalColors = ["#1F5F7A", "#1A7F8E", "#C9810A", "#3C8D2F", "#6B7B8C"]
+metricValueFontSize = "1.9rem"          # key figures: big, but small enough to fit in the cards
+blueBackgroundColor = "#E3EDF2"         # info boxes in fjord tones instead of the default blue
+blueTextColor = "#1F5F7A"
+
+[theme.sidebar]
+backgroundColor = "#EEF2F5"
+secondaryBackgroundColor = "#FFFFFF"

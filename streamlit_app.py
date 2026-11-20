@@ -1,60 +1,40 @@
+"""
+Entry point of the app. It only sets up the page and the navigation; the content is in app_pages/.
+
+Streamlit runs this file on every rerun, so the shared parts (theme in .streamlit/config.toml and the global
+choices in st.session_state) are set up here for every page. The menu is a bar at the top
+with one dropdown per group of pages, grouped by type of task.
+"""
 import streamlit as st
-# Page settings for the home page: browser tab title, icon and wide layout.
-st.set_page_config(page_title="IND320 - Data to Decision", page_icon=":bar_chart:", layout="wide")
-# Home page of the app. Streamlit automatically adds every .py file in the
-# pages/ folder to the sidebar menu (ordered by the number prefix), so the
-# navigation to the other pages comes from the folder structure.
 
-from data_utils import load_national_key_figures
+st.set_page_config(page_title="IND320 · Norwegian reservoirs", page_icon=":material/water_drop:", layout="wide")
 
-st.title("IND320 - Data to Decision")
+from ui_utils import init_state, menu_style  # noqa: E402 (after set_page_config)
 
+pages = {
+    # An empty section name puts the page first in the menu bar, outside the dropdowns
+    "": [st.Page("app_pages/overview.py", title="Overview", icon=":material/home:", default=True)],
+    ":material/table_chart: Explore the data": [
+        st.Page("app_pages/reservoir_data.py", title="Reservoir data"),
+        st.Page("app_pages/cross_border_flows.py", title="Cross-border flows"),
+        st.Page("app_pages/exchange_rates.py", title="Exchange rates"),
+    ],
+    ":material/insights: Patterns and anomalies": [
+        st.Page("app_pages/seasonality.py", title="Seasonality"),
+        st.Page("app_pages/weather_outliers.py", title="Weather outliers"),
+        st.Page("app_pages/weather_vs_reservoir.py", title="Weather vs reservoir"),
+    ],
+    ":material/trending_up: Forecast": [
+        st.Page("app_pages/reservoir_forecast.py", title="Reservoir forecast"),
+    ],
+}
+page = st.navigation(pages, position="top")
+menu_style()
 
-# ---------------------------------------------------------------- key figures
-# A quick overview of the reservoirs in Norway right now, from the same NVE data as the reservoir page
-# (cached for a day). The deltas are in percentage points (pp), since the fill ratio is already a share.
-st.subheader("Norway's reservoirs right now")
+# Global choices (area and period), set the first time the app is opened
 try:
-    key = load_national_key_figures()
-except Exception as error:  # the home page should still work if the NVE API is down
-    st.warning(f"Could not load the key figures from NVE: {error}")
-else:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric(
-        "Fill ratio",
-        f"{key['fill_ratio']:.1%}",
-        delta=f"{key['change_previous_week'] * 100:+.1f} pp vs previous week",
-    )
-    c2.metric(
-        "Same week last year",
-        f"{key['fill_ratio_last_year']:.1%}",
-        delta=f"{(key['fill_ratio'] - key['fill_ratio_last_year']) * 100:+.1f} pp this year",
-    )
-    c3.metric(
-        f"Normal for week {key['week']}",
-        f"{key['median_same_week']:.1%}",
-        delta=f"{(key['fill_ratio'] - key['median_same_week']) * 100:+.1f} pp this year",
-        help=f"Median of week {key['week']} in {key['first_year']}-{key['date'].year - 1}.",
-    )
-    c4.metric(
-        "Stored energy",
-        f"{key['fill_TWh']:.1f} TWh",
-        delta=f"of {key['capacity_TWh']:.1f} TWh capacity",
-        delta_color="off",  # grey and no arrow, since this is not a change
-        delta_arrow="off",
-    )
-    st.caption(f"Source: NVE Magasinstatistikk, week {key['week']} ({key['date'].date()}). NVE publishes new numbers every week.")
-
-st.divider()
-st.write("Use the menu in the sidebar to open the pages:")
-st.markdown(
-    """
-    1. **Reservoir data** - weekly reservoir statistics from NVE (table and plot). The area chosen here is
-       also used by the two analysis pages.
-    2. **Reservoir seasonality** - STL decomposition and spectrogram of the fill ratio.
-    3. **Weather outliers** - outliers in precipitation (DCT + SPC) and anomalies in temperature (LOF)
-       for weather data from open-meteo (ERA5).
-    4. **Cross border flows** - electricity flows between Norway and neighbouring countries (ENTSO-E).
-    """
-)
-
+    init_state()
+except Exception as error:  # the default period needs the NVE data
+    st.error(f"Could not load the reservoir data from NVE: {error}")
+    st.stop()
+page.run()

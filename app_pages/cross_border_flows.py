@@ -1,18 +1,19 @@
 import calendar
 
-import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from data_utils import CONNECTION_NAMES, load_flow_options, load_month_flows, load_yearly_totals
+from ui_utils import page_header
 
-st.title("Cross-border electricity flows")
-st.write("Physical electricity flows between Norway and neighbouring countries (ENTSO-E).")
+page_header("Cross-border flows", "explore", "Physical electricity flows between Norway and neighbouring countries (ENTSO-E).")
 
 # Connections and years that exist in MongoDB (cached in data_utils)
 connections, years = load_flow_options()
 
 # Labels for the two directions, used by both columns
 DIRECTION_LABELS = {"export": "Export (out of Norway)", "import": "Import (into Norway)"}
-DIRECTION_COLOURS = {"export": "tab:blue", "import": "tab:orange"}
+DIRECTION_COLOURS = {"export": "#1F5F7A", "import": "#C9810A"}
 
 # st.columns splits the page into two columns side by side
 left, right = st.columns([2, 3])  # right side wider, so all 12 month pills fit
@@ -38,17 +39,15 @@ with left:
         directions = [d for d in ["export", "import"] if d in totals]
         values = [totals[d] for d in directions]
 
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.pie(
-            values,
-            labels=[f"{DIRECTION_LABELS[d]}\n{totals[d]:.2f} TWh" for d in directions],
-            colors=[DIRECTION_COLOURS[d] for d in directions],
-            autopct="%1.0f%%",
-            startangle=90,
-        )
-        ax.set_title(f"{CONNECTION_NAMES.get(connection, connection)}, {year}")
-        st.pyplot(fig)
-        plt.close(fig)  # free memory, Streamlit reruns the script on every widget change
+        fig = go.Figure(go.Pie(
+            labels=[DIRECTION_LABELS[d] for d in directions], values=values, hole=0.5, sort=False,
+            marker=dict(colors=[DIRECTION_COLOURS[d] for d in directions]),
+            texttemplate="%{percent:.0%}", hovertemplate="%{label}<br>%{value:.2f} TWh<extra></extra>",
+        ))
+        fig.update_layout(title=f"{CONNECTION_NAMES.get(connection, connection)}, {year}", height=380,
+                          legend=dict(orientation="h", y=-0.1),
+                          annotations=[dict(text=f"{sum(values):.1f} TWh", showarrow=False, font=dict(size=16))])
+        st.plotly_chart(fig, theme=None)
 
 # ---------------------------------------------------------------- right column: line plot
 with right:
@@ -67,40 +66,45 @@ with right:
     if not chosen_months:
         st.info("Choose at least one month.")
     else:
-        fig, ax = plt.subplots(figsize=(7, 5))
+        fig = go.Figure()
         labelled = set()  # so each direction only gets one entry in the legend
 
         # One part of the line per chosen month, so months that are not next to each
         # other are not joined by a straight line across the gap
         for month in sorted(chosen_months):
-            month_data = load_month_flows(connection, year, month)
+            # The times in MongoDB are UTC, and the months there are UTC months. A Norwegian day starts at 22:00 or
+            # 23:00 UTC the day before (summer/winter), so the last hours of the previous UTC month are loaded too,
+            # the times are converted to Norwegian time, and only the days of the chosen month are kept.
+            previous = load_month_flows(connection, year, month - 1) if month > 1 else load_month_flows(connection, year - 1, 12)
+            month_data = pd.concat([previous, load_month_flows(connection, year, month)], ignore_index=True)
             if month_data.empty:
                 continue
+            times = pd.to_datetime(month_data["time"])
+            times = times.dt.tz_localize("UTC") if times.dt.tz is None else times
+            month_data["local_time"] = times.dt.tz_convert("Europe/Oslo")
+            month_data = month_data[month_data["local_time"].dt.month == month]
 
-            # Sum the hourly values per day (GWh), same as the plot in the notebook
+            # Sum the hourly values per Norwegian day (GWh)
             daily = (
-                month_data.groupby(["direction", month_data["time"].dt.date])["mwh"]
+                month_data.groupby(["direction", month_data["local_time"].dt.date.rename("time")])["mwh"]
                 .sum()
                 .div(1000)
                 .reset_index()
             )
             for direction in ["export", "import"]:
                 line = daily[daily["direction"] == direction]
-                label = DIRECTION_LABELS[direction] if direction not in labelled else None
+                fig.add_trace(go.Scatter(
+                    x=line["time"], y=line["mwh"], mode="lines+markers", name=DIRECTION_LABELS[direction],
+                    legendgroup=direction, showlegend=direction not in labelled,
+                    line=dict(color=DIRECTION_COLOURS[direction], width=1.8), marker=dict(size=4),
+                ))
                 labelled.add(direction)
-                ax.plot(line["time"], line["mwh"], color=DIRECTION_COLOURS[direction],
-                        linewidth=1.8, marker="o", markersize=3, label=label)
 
         month_names = ", ".join(calendar.month_abbr[m] for m in sorted(chosen_months))
-        ax.set_title(f"Daily flow, {month_names} {year}")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Energy per day (GWh)")
-        ax.grid(alpha=0.3)
-        ax.legend()
-        fig.autofmt_xdate()  # tilted date labels so they don't overlap
-        fig.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+        fig.update_layout(title=f"Daily flow, {month_names} {year}", yaxis_title="Energy per day (GWh)",
+                          height=460, hovermode="x unified",
+                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+        st.plotly_chart(fig, theme=None)
 
 # ---------------------------------------------------------------- data source
 with st.expander("About the data"):
@@ -109,6 +113,8 @@ with st.expander("About the data"):
         - **Source:** ENTSO-E Transparency Platform, physical cross-border flows (A11), 2024-2025.
         - **Processing:** Downloaded in the notebook, stored in Cassandra, summed to hourly energy with Spark
           and saved in MongoDB, which this page reads from. Export = out of Norway, import = into Norway.
+        - **Time zone:** the hours are stored in UTC. They are converted to Norwegian time before they are summed
+          per day, so a day on the plot is a Norwegian day (part 4; in part 3 the days were UTC days).
         """
     )
     
