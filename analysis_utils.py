@@ -60,8 +60,12 @@ def spc_outliers(series, cutoff_per_year=25, n_std=3.0, label="Value", unit=""):
                       yaxis_title=f"{label} ({unit})", xaxis_title="Time (UTC)", height=460, hovermode="x unified",
                       legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
 
-    outliers = pd.DataFrame({label: values[is_outlier], "SATV": satv[is_outlier], "lower limit": lower[is_outlier],
-                             "upper limit": upper[is_outlier]}, index=series.index[is_outlier])
+    # Readable column names with units (the table is shown in the app)
+    outliers = pd.DataFrame({f"{label} ({unit})": values[is_outlier],
+                             f"Seasonally adjusted variation, SATV ({unit})": satv[is_outlier],
+                             f"Lower limit ({unit})": lower[is_outlier],
+                             f"Upper limit ({unit})": upper[is_outlier]},
+                            index=pd.Index(series.index[is_outlier], name="Time (UTC)"))
     summary = {
         "n_outliers": int(is_outlier.sum()),
         "share_outliers": float(is_outlier.mean()),
@@ -98,13 +102,17 @@ def lof_anomalies(series, contamination=0.01, n_neighbors=20, label="Value", uni
                       xaxis_title="Time (UTC)", height=460, hovermode="x unified",
                       legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
 
-    anomalies = pd.DataFrame({label: series.values[is_anomaly], "LOF score": score[is_anomaly]},
-                             index=series.index[is_anomaly]).sort_values("LOF score", ascending=False)
+    # Readable column names with units (the table is shown in the app). The LOF score has no unit: about 1 is
+    # normal, and the higher it is, the more unusual the hour is compared with its neighbours.
+    value_column, score_column = f"{label} ({unit})", "LOF score (1 = normal, higher = more unusual)"
+    anomalies = pd.DataFrame({value_column: series.values[is_anomaly], score_column: score[is_anomaly]},
+                             index=pd.Index(series.index[is_anomaly], name="Time (UTC)")
+                             ).sort_values(score_column, ascending=False)
     summary = {
         "n_anomalies": int(is_anomaly.sum()),
         "share_anomalies": float(is_anomaly.mean()),
-        "lowest": float(anomalies[label].min()) if len(anomalies) else float("nan"),
-        "highest": float(anomalies[label].max()) if len(anomalies) else float("nan"),
+        "lowest": float(anomalies[value_column].min()) if len(anomalies) else float("nan"),
+        "highest": float(anomalies[value_column].max()) if len(anomalies) else float("nan"),
         "months_with_most_anomalies": anomalies.index.month.value_counts().head(3).to_dict(),
     }
     return fig, anomalies, summary
